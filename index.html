@@ -229,7 +229,6 @@ const saveSettings = () => store('v1-settings', ST);
 const GB_RELAY_DEFAULT = 'https://sangerscope-genebe.rehiouisoufiyan.workers.dev';
 const RELAY_DEFAULT = GB_RELAY_DEFAULT;
 const relay = () => String(ST.relay || RELAY_DEFAULT).trim().replace(/\/+$/, '');
-const ACMG_URL = 'https://clairevaltin.github.io/AtelierACMG/';
 
 /* ---------------- network (rate-limited queues, from SangerScope) ---------------- */
 const EU = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
@@ -251,11 +250,11 @@ async function fetchRetry(url, opt = {}, type = 'json', tries = 4) {
   }
   throw err;
 }
-function ncbi(url) {
+function ncbi(url, tries = 6) {
   return serial('ncbi', ST.ncbiKey ? 130 : 400, () => {
     let u = url;
     if (ST.ncbiKey) u += (u.includes('?') ? '&' : '?') + 'api_key=' + encodeURIComponent(ST.ncbiKey);
-    return fetchRetry(u, {}, 'json', 6);   // E-utilities sporadically answers 500/429 without CORS headers
+    return fetchRetry(u, {}, 'json', tries);   // E-utilities sporadically answers 500/429 without CORS headers
   });
 }
 const netMsg = e => e?.name === 'TypeError' ? 'unreachable or blocked by the browser (CORS)' : (e?.message || String(e));
@@ -377,13 +376,25 @@ async function clinvar(V) {
   const cOf = s => String(s || '').replace(/^.*:/, '').trim();   // cdna_change is sometimes prefixed with the transcript: "NM_000518.5(HBB):c.93-21G>A"
   const single = r => (r.variation_set || []).length === 1;
   const same = r => single(r) && (spdiEq(me, r.variation_set[0].canonical_spdi) || (!!V.c && cOf(r.variation_set[0].cdna_change) === V.c && accOf(r.variation_set[0].variation_name) === txBase));
-  const term = `${chr}[chr] AND ${pos - 3}:${end + (indel ? 60 : 3)}[chrpos38]`;
-  const s = await ncbi(`${EU}/esearch.fcgi?db=clinvar&retmode=json&retmax=500&term=${encodeURIComponent(term)}`);
-  const recs = await cvSummaries(s.esearchresult?.idlist || []);
+  const lo = pos - 3, hi = end + (indel ? 60 : 3);
+  let ids, via = 'ncbi';
+  try {
+    const s = await ncbi(`${EU}/esearch.fcgi?db=clinvar&retmode=json&retmax=500&term=${encodeURIComponent(`${chr}[chr] AND ${lo}:${hi}[chrpos38]`)}`, 3);
+    ids = s.esearchresult?.idlist || [];
+  } catch (e) {
+    // NCBI's search (esearch) has outages where it answers 500 without CORS headers. MyVariant.info lists the ClinVar
+    // variation IDs at a position; the records themselves are still fetched live from ClinVar (esummary).
+    const d = await fetchRetry(`https://myvariant.info/v1/query?q=chr${chr}:${lo}-${hi}&assembly=hg38&fields=clinvar.variant_id&size=1000`, {}, 'json', 3);
+    ids = [...new Set((d.hits || []).flatMap(h => [].concat(h.clinvar || []).flatMap(c => [].concat(c.variant_id ?? []))).map(String))];
+    via = 'myvariant';
+  }
+  const recs = await cvSummaries(ids);
   let exact = recs.find(same);
   if (!exact && V.tx && V.c) {   // text search: ClinVar may anchor indels in a repeat elsewhere
-    const s2 = await ncbi(`${EU}/esearch.fcgi?db=clinvar&retmode=json&retmax=50&term=${encodeURIComponent(`${V.tx}:${V.c}`)}`);
-    exact = (await cvSummaries(s2.esearchresult?.idlist || [])).find(same);
+    try {
+      const s2 = await ncbi(`${EU}/esearch.fcgi?db=clinvar&retmode=json&retmax=50&term=${encodeURIComponent(`${V.tx}:${V.c}`)}`, 3);
+      exact = (await cvSummaries(s2.esearchresult?.idlist || [])).find(same);
+    } catch (e) { /* search down: keep the positional result */ }
   }
   const hap = recs.filter(r => !single(r) && (r.variation_set || []).some(x => spdiEq(me, x.canonical_spdi)));
   // same codon (missense only): PS1 / PM5 helpers
@@ -396,7 +407,7 @@ async function clinvar(V) {
   }
   const used = new Set([exact?.uid, ...hap.map(r => r.uid), ...(codon ? [...codon.same, ...codon.other].map(h => h.uid) : [])]);
   const near = recs.filter(r => !used.has(r.uid) && single(r)).filter(r => { const p = recPos(r); return p && p[1] >= pos && p[0] <= Math.max(end, pos + 1); }).map(cvParse);
-  return {exact: exact ? cvParse(exact) : null, hap: hap.map(cvParse), codon, near, total: recs.length};
+  return {exact: exact ? cvParse(exact) : null, hap: hap.map(cvParse), codon, near, total: recs.length, via};
 }
 
 /* ---- gnomAD v4 ---- */
@@ -583,7 +594,7 @@ const paperList = ps => `<div class="lst">${ps.map(p => `<div class="it"><div cl
 const CARDS = [
   ['vv', 'Nomenclature · VariantValidator'], ['cv', 'ClinVar'], ['gb', 'GeneBe · automatic ACMG'],
   ['gn', 'gnomAD v4.1'], ['splice', 'Splicing · SpliceAI &amp; Pangolin'], ['scores', 'In-silico scores'],
-  ['gene', 'Gene · ClinGen &amp; constraint'], ['lit', 'Literature'], ['links', 'Links &amp; ACMG worksheet'],
+  ['gene', 'Gene · ClinGen &amp; constraint'], ['lit', 'Literature'], ['links', 'Links'],
 ];
 function layout() {
   $('#out').innerHTML = `<section class="card" id="summary"></section><div class="cards" style="margin-top:14px">${CARDS.map(([id, t]) => `<section class="card" id="c-${id}"><h2>${t}<span class="rt"></span></h2><div class="body"></div></section>`).join('')}</div>`;
@@ -617,7 +628,6 @@ R.summary = () => {
         ${V.p ? `<div class="pp">${esc(V.p)}${V.pSlr && V.pSlr !== V.p ? ` · ${esc(V.pSlr)}` : ''}</div>` : ''}
       </div>
       <div class="row">
-        <a class="btn" href="${esc(acmgHref(V))}" target="_blank" rel="noopener" id="acmgBtn" title="Opens Atelier ACMG; the HGVS is copied to the clipboard">ACMG worksheet →</a>
         <button class="btn ghost" id="copyRep" title="Copy a plain-text summary for a report or e-mail">Copy summary</button>
         <button class="btn ghost" id="reload" title="Query every source again">Refresh</button>
       </div>
@@ -645,9 +655,7 @@ R.summary = () => {
     </div>`;
   $('#copyRep').onclick = () => copyText(reportText(), 'Summary copied');
   $('#reload').onclick = () => go(S.input, true);
-  $('#acmgBtn').onclick = () => { copyText(V.tx ? `${V.tx}:${V.c}` : V.gid, 'HGVS copied — paste it in Atelier ACMG'); };
 };
-const acmgHref = V => `${ACMG_URL}?q=${encodeURIComponent(V.tx ? `${V.tx}:${V.c}` : V.gid)}`;
 
 R.vv = () => {
   const V = S.V;
@@ -695,6 +703,7 @@ R.cv = () => {
     if (!cnt) h += '<div class="small muted">No other missense change at this residue in ClinVar.</div>';
     else h += `<div class="lst">${[...c.same.map(r => Object.assign({tag: 'same aa (PS1)'}, r)), ...c.other.sort((a, b) => b.stars - a.stars).map(r => Object.assign({tag: `${c.ref}${c.pos}${Object.keys(AA1).find(k => AA1[k] === r.aa) || r.aa}`}, r))].slice(0, 6).map(r => `<div class="it"><span class="bdg">${esc(r.tag)}</span> ${clsChip(r.cls)} ${starsH(r.stars, r.review)} ${ext(`https://www.ncbi.nlm.nih.gov/clinvar/variation/${r.uid}/`, esc(r.acc))}<div class="small clamp2">${esc(r.title)}</div></div>`).join('')}${cnt > 6 ? `<div class="small muted">… ${cnt - 6} more</div>` : ''}</div>`;
   }
+  if (x.via === 'myvariant') h += '<div class="small muted" style="margin-top:8px">ClinVar search is down right now: records found through MyVariant.info, classifications loaded live from ClinVar. Very recent submissions may be missing.</div>';
   if (x.near.length) h += `<details><summary>${x.near.length} other record${x.near.length > 1 ? 's' : ''} at this position</summary><div class="lst">${x.near.slice(0, 10).map(recItem).join('')}</div></details>`;
   put('cv', h, rt);
 };
@@ -843,8 +852,6 @@ R.links = () => {
   ];
   if (V.gene) L.push(['LOVD', `https://databases.lovd.nl/shared/genes/${encodeURIComponent(V.gene)}`], ['GeneReviews', `https://www.ncbi.nlm.nih.gov/books/NBK1116/?term=${encodeURIComponent(V.gene)}`], ['PanelApp', `https://panelapp.genomicsengland.co.uk/panels/entities/${encodeURIComponent(V.gene)}`], ['CSpec (VCEP rules)', `https://cspec.genome.network/cspec/ui/svi/?search=${encodeURIComponent(V.gene)}`]);
   put('links', `
-    <a class="btn" href="${esc(acmgHref(V))}" target="_blank" rel="noopener" data-copy="${esc(V.tx ? hg : V.gid)}" style="width:100%;text-align:center">Open the ACMG worksheet (Atelier ACMG) →</a>
-    <div class="small muted" style="margin:6px 0 12px">The HGVS is copied to the clipboard on click — paste it in Atelier ACMG.</div>
     <div class="links">${L.map(([t, u]) => ext(u, esc(t))).join('')}</div>`, '');
 };
 
@@ -939,8 +946,6 @@ document.addEventListener('click', e => {
   if (q) { e.preventDefault(); go(q.dataset.q); window.scrollTo({top: 0, behavior: 'smooth'}); return; }
   const c = e.target.closest('button[data-copy]');
   if (c) { e.preventDefault(); copyText(c.dataset.copy); return; }
-  const a = e.target.closest('a[data-copy]');
-  if (a) copyText(a.dataset.copy, 'HGVS copied — paste it in Atelier ACMG');
   const rt = e.target.closest('[data-retry]');
   if (rt && S?.fns[rt.dataset.retry]) { task(RUN, rt.dataset.retry, S.fns[rt.dataset.retry]); return; }
   if (e.target.id === 'clrRecent') { store('v1-recent', []); showRecent(); }
