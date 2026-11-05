@@ -767,7 +767,7 @@ R.scores = () => {
   let h = '';
   if (c?.st === 'run' || m?.st === 'run' || g?.st === 'run') h += loading('Collecting scores…');
   h += rows.length ? `<table class="tbl"><tbody>${rows.join('')}</tbody></table>` : (c?.st === 'run' || m?.st === 'run') ? '' : '<div class="small muted">No scores available (missense predictors only apply to missense variants).</div>';
-  if (c?.st === 'err') h += `<div class="note">CADD: ${esc(c.msg)} — paste <span class="mono">relay/variantone-relay.js</span> into your sangerscope-genebe worker (see README).</div>`;
+  if (c?.st === 'err') h += `<div class="note">CADD: not available right now (${esc(c.msg)}).</div>`;
   else if (c?.st === 'done' && c.none && !(m?.cadd != null)) h += `<div class="small muted" style="margin-top:6px">CADD has no pre-computed score for this ${V.vcf.ref.length === 1 && V.vcf.alt.length === 1 ? 'variant' : 'indel'}; ${ext('https://cadd.gs.washington.edu/score', 'score it on the CADD site')}.</div>`;
   if (m?.st === 'done' && m.id) {
     const tbl = rs => `<table class="tbl"><tbody>${rs.map(r => `<tr><td>${esc(r[0])}</td><td class="n">${esc(r[1])}</td><td class="small muted">${esc(r[2] || '')}</td></tr>`).join('')}</tbody></table>`;
@@ -817,7 +817,7 @@ R.lit = () => {
     else if (!pt.n) h += '<div class="small muted">No match.</div>';
     else h += `<div class="small" style="margin-bottom:5px"><b>${fmtN(pt.n)}</b> article${pt.n > 1 ? 's' : ''} · ${ext(`https://www.ncbi.nlm.nih.gov/research/pubtator3/docsum?text=${encodeURIComponent(pt.q)}`, 'open in PubTator3')}</div><details${lv?.n ? '' : ' open'}><summary>Top results</summary>${paperList(pt.papers)}</details>`;
   }
-  if (L.relayErr) h += `<div class="note">The VariantOne relay (${esc(relay())}) is not reachable — paste <span class="mono">relay/variantone-relay.js</span> into your sangerscope-genebe worker on Cloudflare (see README).</div>`;
+  if (L.relayErr) h += `<div class="note">LitVar2 / PubTator3 are not available right now; showing a PubMed search instead.</div>`;
   if (L.pubmed) {
     h += `<div class="sub">PubMed</div>`;
     if (L.pubmed.err) h += `<div class="small muted">not loaded (${esc(L.pubmed.err)})</div>`;
