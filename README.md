@@ -6,7 +6,7 @@ One variant, every source, one screen. Paste an HGVS and VariantOne shows, side 
 |---|---|---|
 | Nomenclature | VariantValidator (GRCh38, MANE Select by default) | direct |
 | ClinVar | NCBI E-utilities — exact match on canonical SPDI (indels included, repeat-aware) or on `cdna_change` (the transcript prefix ClinVar sometimes adds is stripped); same-codon variants for PS1/PM5; haplotype records | direct |
-| GeneBe | automatic ACMG criteria and score | SangerScope's relay (`sangerscope-genebe…workers.dev`) |
+| GeneBe | automatic ACMG criteria and score | relay |
 | gnomAD v4.1 | joint AF, AC/AN, homozygotes, FAF95 max, genetic ancestry groups (Middle Eastern highlighted), filters | direct |
 | Splicing | SpliceAI-lookup and Pangolin (Broad), MANE transcript | direct |
 | In-silico | CADD v1.7 (relay, falls back to MobiDetails), REVEL, AlphaMissense, BayesDel, phyloP, all MobiDetails predictions | relay / direct |
@@ -27,24 +27,27 @@ optional GeneBe / MobiDetails / NCBI keys), the theme and the recent-variant lis
 - `data/clingen.json` — ClinGen validity and dosage curations. ClinGen sends no CORS headers, so the data is bundled.
   `.github/workflows/clingen.yml` refreshes it every Monday (and on demand: Actions → *Refresh ClinGen data* → Run
   workflow). By hand: `python3 tools/build_clingen.py`.
-- `relay/variantone-relay.js` — Cloudflare Worker for CADD, LitVar2 and PubTator3 (no CORS headers).
+- `relay/variantone-relay.js` — Cloudflare Worker shared with SangerScope: GeneBe, CADD, LitVar2 and PubTator3.
 
-## Deploy the relay (about 5 minutes, same as the GeneBe relay)
+## The relay: one worker for SangerScope and VariantOne
 
-1. https://dash.cloudflare.com → **Workers & Pages → Create → Create Worker**, name it **`variantone-relay`** → Deploy.
-2. **Edit code** → replace everything with `relay/variantone-relay.js` → **Deploy**.
-3. The URL will be `https://variantone-relay.rehiouisoufiyan.workers.dev`, which is already VariantOne's default.
-   With another name, paste the URL in VariantOne → Settings.
-4. Optional: `ALLOWED_ORIGINS` (Settings → Variables) if the site is not served from `https://clairevaltin.github.io`.
+No new worker is needed. `relay/variantone-relay.js` is SangerScope's GeneBe relay with three extra read-only routes
+(CADD, LitVar2, PubTator3). GeneBe requests are handled exactly as before, so SangerScope keeps working.
 
-It forwards only `GET` requests to the three allow-listed APIs, refuses other websites (403) and other paths (404),
-stores and logs nothing, and lets Cloudflare cache answers for a day. Free plan: 100,000 requests/day.
+1. https://dash.cloudflare.com → **Workers & Pages** → **sangerscope-genebe** → **Edit code**.
+2. Select everything, paste the contents of `relay/variantone-relay.js` → **Deploy**.
+3. Nothing to change in VariantOne: its default relay is already `https://sangerscope-genebe.rehiouisoufiyan.workers.dev`.
+   Both apps live on `https://clairevaltin.github.io`, which the worker already allows.
 
-Until it is deployed, the CADD score comes from MobiDetails and the literature card falls back to a PubMed search.
+The worker refuses other websites (403) and unknown paths (404), stores and logs nothing, and lets Cloudflare cache the
+CADD / literature answers for a day. Free plan: 100,000 requests/day, shared by both apps.
+
+Until the new code is deployed, the CADD score comes from MobiDetails and the literature card falls back to a PubMed
+search; GeneBe works either way.
 
 ## GitHub Pages
 
-Settings → Pages → Deploy from branch → `main` / root. Allow the workflow to push the ClinGen refresh:
+Settings → Pages → Deploy from branch → `main` / root. The site will be https://clairevaltin.github.io/VariantOne/. Allow the workflow to push the ClinGen refresh:
 Settings → Actions → General → Workflow permissions → *Read and write*.
 
 ## Run locally

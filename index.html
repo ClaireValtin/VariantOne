@@ -191,8 +191,8 @@ footer{max-width:1500px;margin:0 auto;padding:0 16px 30px;color:var(--muted);fon
 <dialog id="setDlg">
   <h3>Settings</h3>
   <div class="set">
-    <label><b>VariantOne relay URL</b><small>Cloudflare Worker from <span class="mono">relay/variantone-relay.js</span>, used for CADD, LitVar2 and PubTator3 (they send no CORS headers). Leave empty for the default: <span class="mono" id="relayDef"></span></small><input class="inp mono" id="sRelay" placeholder="https://variantone-relay.<account>.workers.dev"></label>
-    <label><b>GeneBe relay URL</b><small>Leave empty for the SangerScope relay: <span class="mono" id="gbRelayDef"></span>. Not used on localhost.</small><input class="inp mono" id="sGbRelay"></label>
+    <label><b>VariantOne relay URL</b><small>Cloudflare Worker running <span class="mono">relay/variantone-relay.js</span> (the SangerScope GeneBe worker with the new code), used for CADD, LitVar2 and PubTator3 (they send no CORS headers). Leave empty for the default: <span class="mono" id="relayDef"></span></small><input class="inp mono" id="sRelay" placeholder="https://….workers.dev"></label>
+    <label><b>GeneBe relay URL</b><small>Leave empty for the default: <span class="mono" id="gbRelayDef"></span>. Not used on localhost.</small><input class="inp mono" id="sGbRelay"></label>
     <label><b>GeneBe account (optional)</b><small>E-mail and API key from your GeneBe profile; raises the anonymous daily limit. Stored only in this browser.</small><span class="row"><input class="inp" id="sGbUser" placeholder="e-mail" style="flex:1"><input class="inp mono" id="sGbKey" placeholder="API key" type="password" style="flex:1"></span></label>
     <label><b>MobiDetails API key (optional)</b><small>Lets VariantOne create a variant MobiDetails doesn't have yet. Stored only in this browser.</small><input class="inp mono" id="sMdKey" type="password"></label>
     <label><b>NCBI API key (optional)</b><small>Raises the E-utilities limit from 3 to 10 requests/s. Stored only in this browser.</small><input class="inp mono" id="sNcbiKey" type="password"></label>
@@ -225,8 +225,9 @@ const fmtN = n => n == null ? '—' : (+n).toLocaleString('en-US');
 const DEF = {relay: '', gbRelay: '', gbUser: '', gbKey: '', mdKey: '', ncbiKey: ''};
 const ST = Object.assign({}, DEF, recall('v1-settings') || {});
 const saveSettings = () => store('v1-settings', ST);
-const RELAY_DEFAULT = 'https://variantone-relay.rehiouisoufiyan.workers.dev';    // relay/variantone-relay.js
-const GB_RELAY_DEFAULT = 'https://sangerscope-genebe.rehiouisoufiyan.workers.dev'; // SangerScope's relay/genebe-relay.js
+// One Cloudflare Worker serves both apps: relay/variantone-relay.js pasted over SangerScope's GeneBe worker
+const GB_RELAY_DEFAULT = 'https://sangerscope-genebe.rehiouisoufiyan.workers.dev';
+const RELAY_DEFAULT = GB_RELAY_DEFAULT;
 const relay = () => String(ST.relay || RELAY_DEFAULT).trim().replace(/\/+$/, '');
 const ACMG_URL = 'https://clairevaltin.github.io/AtelierACMG/';
 
@@ -766,7 +767,7 @@ R.scores = () => {
   let h = '';
   if (c?.st === 'run' || m?.st === 'run' || g?.st === 'run') h += loading('Collecting scores…');
   h += rows.length ? `<table class="tbl"><tbody>${rows.join('')}</tbody></table>` : (c?.st === 'run' || m?.st === 'run') ? '' : '<div class="small muted">No scores available (missense predictors only apply to missense variants).</div>';
-  if (c?.st === 'err') h += `<div class="note">CADD: ${esc(c.msg)} — deploy <span class="mono">relay/variantone-relay.js</span> and set its URL in Settings.</div>`;
+  if (c?.st === 'err') h += `<div class="note">CADD: ${esc(c.msg)} — paste <span class="mono">relay/variantone-relay.js</span> into your sangerscope-genebe worker (see README).</div>`;
   else if (c?.st === 'done' && c.none && !(m?.cadd != null)) h += `<div class="small muted" style="margin-top:6px">CADD has no pre-computed score for this ${V.vcf.ref.length === 1 && V.vcf.alt.length === 1 ? 'variant' : 'indel'}; ${ext('https://cadd.gs.washington.edu/score', 'score it on the CADD site')}.</div>`;
   if (m?.st === 'done' && m.id) {
     const tbl = rs => `<table class="tbl"><tbody>${rs.map(r => `<tr><td>${esc(r[0])}</td><td class="n">${esc(r[1])}</td><td class="small muted">${esc(r[2] || '')}</td></tr>`).join('')}</tbody></table>`;
@@ -816,7 +817,7 @@ R.lit = () => {
     else if (!pt.n) h += '<div class="small muted">No match.</div>';
     else h += `<div class="small" style="margin-bottom:5px"><b>${fmtN(pt.n)}</b> article${pt.n > 1 ? 's' : ''} · ${ext(`https://www.ncbi.nlm.nih.gov/research/pubtator3/docsum?text=${encodeURIComponent(pt.q)}`, 'open in PubTator3')}</div><details${lv?.n ? '' : ' open'}><summary>Top results</summary>${paperList(pt.papers)}</details>`;
   }
-  if (L.relayErr) h += `<div class="note">The VariantOne relay (${esc(relay())}) is not reachable — deploy <span class="mono">relay/variantone-relay.js</span> on Cloudflare and set its URL in Settings.</div>`;
+  if (L.relayErr) h += `<div class="note">The VariantOne relay (${esc(relay())}) is not reachable — paste <span class="mono">relay/variantone-relay.js</span> into your sangerscope-genebe worker on Cloudflare (see README).</div>`;
   if (L.pubmed) {
     h += `<div class="sub">PubMed</div>`;
     if (L.pubmed.err) h += `<div class="small muted">not loaded (${esc(L.pubmed.err)})</div>`;
